@@ -2,9 +2,16 @@ name: build-so
 on:
   workflow_dispatch:
   push:
+
+permissions:
+  contents: write
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -15,15 +22,42 @@ jobs:
           git fetch -q --depth 1 https://github.com/jmpews/Dobby 5dfc8546954ce3b3198132ab13fddb89ee92cdd7
           git checkout -q FETCH_HEAD
 
+      - name: Pick NDK r26d (older, matches Dobby)
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;26.3.11579264" > /dev/null || true
+          if [ -d "$ANDROID_HOME/ndk/26.3.11579264" ]; then
+            echo "NDK=$ANDROID_HOME/ndk/26.3.11579264" >> "$GITHUB_ENV"
+          else
+            echo "NDK=$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
+          fi
+
       - name: Build libmapdump.so (arm64-v8a)
         run: |
-          cmake -S . -B build \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-          cmake --build build -j4 --target mapdump
-          ls -l build/libmapdump.so
+          echo "NDK = $NDK"
+          cmake --version | head -1
+          {
+            echo "NDK = $NDK"
+            cmake -S . -B build \
+              -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+              -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+            cmake --build build -j4 --target mapdump --verbose
+          } 2>&1 | tee build.log
+          find build -name libmapdump.so -exec ls -l {} \;
+
+      - name: Publish log to branch "buildlog" (only on failure)
+        if: failure()
+        run: |
+          mkdir /tmp/lg
+          tail -n 400 build.log > /tmp/lg/build.log || echo "no log" > /tmp/lg/build.log
+          cd /tmp/lg
+          git init -q -b buildlog
+          git config user.name ci
+          git config user.email ci@users.noreply.github.com
+          git add build.log
+          git commit -qm "build log"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" buildlog
 
       - uses: actions/upload-artifact@v4
         with:
