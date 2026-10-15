@@ -1,0 +1,31 @@
+name: build-so
+on:
+  workflow_dispatch:
+  push:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch Dobby (pinned)
+        run: |
+          mkdir -p third_party/Dobby && cd third_party/Dobby
+          git init -q
+          git fetch -q --depth 1 https://github.com/jmpews/Dobby 5dfc8546954ce3b3198132ab13fddb89ee92cdd7
+          git checkout -q FETCH_HEAD
+
+      - name: Build libmapdump.so (arm64-v8a)
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          cmake --build build -j4 --target mapdump
+          ls -l build/libmapdump.so
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libmapdump
+          path: build/libmapdump.so
